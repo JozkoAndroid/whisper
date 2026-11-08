@@ -40,10 +40,25 @@ RELEASE = "https://github.com/JozkoAndroid/whisper/releases/download/models-v1/"
 BASE_MIRROR = "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/main/"
 
 
+# GitHub release asset ids of models-v1. The API address is far more reliable than
+# github.com/.../releases/download, which often answers 504.
+ASSET_IDS = {
+    ("base", "decoder.int8.onnx"): 723428492, ("base", "encoder.int8.onnx"): 723428493,
+    ("base", "joiner.int8.onnx"): 723428494, ("base", "tokens.txt"): 723428496,
+    ("sk", "decoder.int8.onnx"): 723428508, ("sk", "encoder.int8.onnx"): 723428512,
+    ("sk", "joiner.int8.onnx"): 723428518, ("sk", "tokens.txt"): 723428516,
+}
+API_ASSET = "https://api.github.com/repos/JozkoAndroid/whisper/releases/assets/"
+
+
 def urls_for(model: str, file: str) -> list[str]:
-    urls = [RELEASE + f"parakeet-{model}-{file}"]
+    """Sources in order of preference."""
+    urls = []
     if model == "base":
-        urls.append(BASE_MIRROR + file)
+        urls.append(BASE_MIRROR + file)  # Hugging Face: fast and reliable
+    if (model, file) in ASSET_IDS:
+        urls.append(API_ASSET + str(ASSET_IDS[(model, file)]))
+    urls.append(RELEASE + f"parakeet-{model}-{file}")
     return urls
 
 
@@ -85,7 +100,7 @@ def models_ready() -> bool:
 TOTAL_BYTES = 1_341_000_000  # approximate, only for the progress display
 
 
-def _fetch(urls: list[str], dest: Path, on_bytes: Callable[[int], None], attempts: int = 15) -> None:
+def _fetch(urls: list[str], dest: Path, on_bytes: Callable[[int], None], attempts: int = 8) -> None:
     """Download to dest, resuming a partial file and retrying on errors, then
     trying the next source. No HEAD request: GitHub's signed links only allow GET."""
     part = dest.with_suffix(dest.suffix + ".part")
@@ -93,7 +108,7 @@ def _fetch(urls: list[str], dest: Path, on_bytes: Callable[[int], None], attempt
     for url in urls:
         for attempt in range(attempts):
             have = part.stat().st_size if part.exists() else 0
-            headers = {"User-Agent": "hlas"}
+            headers = {"User-Agent": "hlas", "Accept": "application/octet-stream"}
             if have:
                 headers["Range"] = f"bytes={have}-"
             try:

@@ -11,8 +11,23 @@ object Models {
     /** Second source for the base model (same NVIDIA model, converted by the sherpa-onnx author). */
     const val BASE_MIRROR = "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/main/"
 
-    fun urls(name: String, file: String) =
-        listOf(RELEASE + "parakeet-$name-$file") + if (name == "base") listOf(BASE_MIRROR + file) else emptyList()
+    /** GitHub release asset ids of models-v1 (the API address is far more reliable than releases/download). */
+    private val ASSET_IDS = mapOf(
+        ("base" to "decoder.int8.onnx") to 723428492L, ("base" to "encoder.int8.onnx") to 723428493L,
+        ("base" to "joiner.int8.onnx") to 723428494L, ("base" to "tokens.txt") to 723428496L,
+        ("sk" to "decoder.int8.onnx") to 723428508L, ("sk" to "encoder.int8.onnx") to 723428512L,
+        ("sk" to "joiner.int8.onnx") to 723428518L, ("sk" to "tokens.txt") to 723428516L,
+    )
+    private const val API_ASSET = "https://api.github.com/repos/JozkoAndroid/whisper/releases/assets/"
+
+    /** Sources in order of preference: Hugging Face (base), GitHub API, GitHub release page. */
+    fun urls(name: String, file: String): List<String> {
+        val out = mutableListOf<String>()
+        if (name == "base") out.add(BASE_MIRROR + file)
+        ASSET_IDS[name to file]?.let { out.add(API_ASSET + it) }
+        out.add(RELEASE + "parakeet-$name-$file")
+        return out
+    }
     val FILES = listOf("encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt")
     val NAMES = listOf("base", "sk")
 
@@ -58,9 +73,10 @@ object Models {
     internal fun fetch(url: String, dest: File, onBytes: (Long) -> Unit) {
         val part = File(dest.path + ".part")
         var lastError: Exception? = null
-        for (attempt in 0 until 15) {
+        for (attempt in 0 until 8) {
             val have = if (part.exists()) part.length() else 0L
-            val req = Request.Builder().url(url).apply { if (have > 0) header("Range", "bytes=$have-") }.build()
+            val req = Request.Builder().url(url).header("Accept", "application/octet-stream")
+                .apply { if (have > 0) header("Range", "bytes=$have-") }.build()
             try {
                 Stt.http.newCall(req).execute().use { resp ->
                     if (resp.code == 416 && have > 0) { onBytes(-have); part.delete(); throw java.io.IOException("restart") }

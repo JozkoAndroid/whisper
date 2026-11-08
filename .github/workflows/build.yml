@@ -39,7 +39,11 @@ jobs:
         env:
           PYTHONIOENCODING: utf-8
         run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          $t = Get-Date
           python -m hlas models
+          Write-Output "model download took $([int]((Get-Date) - $t).TotalSeconds) s"
           python -m hlas transcribe desktop/tests/data/sk2.wav --no-cleanup --json
           python -m hlas transcribe desktop/tests/data/mix4.wav --no-cleanup --json
       - name: Windows test - start Hlas.exe
