@@ -99,6 +99,11 @@ def cmd_config(a) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    for stream in (sys.stdout, sys.stderr):  # Windows consoles default to cp1252: Slovak letters would crash
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+        except Exception:
+            pass
     p = argparse.ArgumentParser(prog="hlas", description="Dictation for Slovak, German and English.")
     sub = p.add_subparsers(dest="cmd")
 

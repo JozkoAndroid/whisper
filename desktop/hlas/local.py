@@ -265,9 +265,13 @@ def engine() -> LocalEngine:
 
 
 def download_cli() -> None:
+    err = sys.stderr  # None inside the windowed Hlas.exe
+
     def show(frac, msg):
-        sys.stderr.write(f"\r[hlas] {msg}   ")
-        sys.stderr.flush()
+        if err:
+            err.write(f"\r[hlas] {msg}   ")
+            err.flush()
 
     download_models(show)
-    sys.stderr.write("\n[hlas] speech models ready\n")
+    if err:
+        err.write("\n[hlas] speech models ready\n")

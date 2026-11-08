@@ -32,6 +32,34 @@ jobs:
           --hidden-import pystray._win32
           --collect-all sherpa_onnx
           hlas_app.py
+      # Real Windows checks: download the models from the release, transcribe
+      # recordings, then start Hlas.exe and confirm it loads them without errors.
+      - name: Windows test - download models and transcribe
+        shell: pwsh
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          python -m hlas models
+          python -m hlas transcribe desktop/tests/data/sk2.wav --no-cleanup --json
+          python -m hlas transcribe desktop/tests/data/mix4.wav --no-cleanup --json
+      - name: Windows test - start Hlas.exe
+        shell: pwsh
+        run: |
+          $p = Start-Process desktop/dist/Hlas.exe -PassThru
+          $logPath = "$env:APPDATA/Hlas/hlas.log"
+          for ($i = 0; $i -lt 40; $i++) {
+            Start-Sleep 3
+            if ($p.HasExited) { break }
+            if ((Test-Path $logPath) -and ((Get-Content $logPath -Raw) -match "speech models ready")) { break }
+          }
+          $log = if (Test-Path $logPath) { Get-Content $logPath -Raw } else { "(no log file)" }
+          Write-Output $log
+          if ($p.HasExited) { throw "Hlas.exe exited early (code $($p.ExitCode))" }
+          Stop-Process -Id $p.Id -Force
+          Get-Process Hlas -ErrorAction SilentlyContinue | Stop-Process -Force
+          if ($log -notmatch "hotkey listener started") { throw "hotkey listener did not start" }
+          if ($log -notmatch "speech models ready") { throw "speech models did not load" }
+          if ($log -match "ERROR|Traceback") { throw "errors in the log" }
       - uses: actions/upload-artifact@v4
         with:
           name: Hlas-windows

@@ -250,9 +250,11 @@ class App:
             return
         trim_history()
         self.hotkey.start()
+        log.info("hotkey listener started (%s)", self.cfg.hotkey)
         self._start_tray()
         self.root.after(30, self._tick)
-        if self.cfg.stt_provider != "local" and not self._stt_ready()[0]:
+        if not self._stt_ready()[0]:
+            # First start: show Settings so the model download (or missing key) is visible.
             self.root.after(300, self.open_settings)
         self.prepare_models()
         self.root.mainloop()
@@ -287,6 +289,7 @@ class App:
                 self.models_state = "loading"
                 local.engine().preload()
                 self.models_state = "ready"
+                log.info("speech models ready")
                 self.events.put(("models_ready",))
             except Exception as e:
                 log.exception("model download failed")
