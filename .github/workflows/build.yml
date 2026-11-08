@@ -1,0 +1,70 @@
+name: build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install "./desktop[app,dev]" pyinstaller
+      - name: Test
+        run: python -m pytest -q desktop/tests
+      - name: Build Hlas.exe
+        working-directory: desktop
+        run: >
+          pyinstaller --noconfirm --onefile --windowed --name Hlas
+          --hidden-import pynput.keyboard._win32 --hidden-import pynput.mouse._win32
+          --hidden-import pystray._win32
+          hlas_app.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Hlas-windows
+          path: desktop/dist/Hlas.exe
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Build APK
+        working-directory: android
+        run: ./gradlew --no-daemon testDebugUnitTest assembleRelease
+      - name: Rename APK
+        run: cp android/app/build/outputs/apk/release/app-release.apk Hlas-android.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Hlas-android
+          path: Hlas-android.apk
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/Hlas.exe
+            dist/Hlas-android.apk

@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fitsSystemWindows="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Hlas"
+            android:textSize="28sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:text="Voice keyboard for Slovak, German and English (mixing allowed)."
+            android:textColor="#52525B" />
+
+        <Button android:id="@+id/btn_mic" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="1. Allow microphone" />
+        <Button android:id="@+id/btn_enable" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="2. Enable Hlas keyboard" />
+        <Button android:id="@+id/btn_pick" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="3. Switch to Hlas keyboard" />
+
+        <TextView style="@style/Label" android:text="Speech model" />
+        <Spinner android:id="@+id/provider" android:layout_width="match_parent" android:layout_height="wrap_content" />
+
+        <TextView style="@style/Label" android:text="OpenAI API key (speech, recommended)" />
+        <EditText android:id="@+id/openai_key" style="@style/Secret" />
+        <TextView style="@style/Label" android:text="ElevenLabs API key (optional)" />
+        <EditText android:id="@+id/elevenlabs_key" style="@style/Secret" />
+        <TextView style="@style/Label" android:text="Groq API key (optional)" />
+        <EditText android:id="@+id/groq_key" style="@style/Secret" />
+
+        <TextView style="@style/Label" android:text="Default language" />
+        <Spinner android:id="@+id/language" android:layout_width="match_parent" android:layout_height="wrap_content" />
+
+        <CheckBox android:id="@+id/cleanup" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginTop="16dp" android:text="AI cleanup (fix mistakes, punctuation, filler words)" />
+        <TextView style="@style/Label" android:text="Anthropic API key (for cleanup)" />
+        <EditText android:id="@+id/anthropic_key" style="@style/Secret" />
+        <TextView style="@style/Label" android:text="Cleanup model (claude-haiku-5-5 is fastest)" />
+        <EditText android:id="@+id/cleanup_model" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:inputType="text" android:singleLine="true" />
+
+        <TextView style="@style/Label" android:text="Vocabulary: one per line (names, jargon, products)" />
+        <EditText android:id="@+id/vocabulary" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:gravity="top" android:inputType="textMultiLine" android:minLines="4" />
+
+        <Button android:id="@+id/btn_save" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="16dp" android:text="Save" />
+
+        <TextView style="@style/Label" android:text="Try it here:" />
+        <EditText android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:gravity="top" android:hint="Tap here, then use the Hlas keyboard" android:inputType="textMultiLine"
+            android:minLines="3" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Tap the mic to talk hands-free, tap again to finish. Or hold the mic and release. Tap the language chip while talking to switch language from that point on. Keys are stored only on this phone."
+            android:textColor="#52525B" />
+    </LinearLayout>
+</ScrollView>
