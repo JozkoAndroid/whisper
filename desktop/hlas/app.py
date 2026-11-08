@@ -8,6 +8,9 @@ background threads and talk to the UI through a queue.
 from __future__ import annotations
 
 import json
+import logging
+import logging.handlers
+import os
 import queue
 import sys
 import threading
@@ -21,6 +24,23 @@ from .context import foreground_app, is_coding_app
 from .hotkey import GlobalHotkey, HotkeyMachine, parse_combo
 from .insert import paste_text
 from .pipeline import Transcriber
+
+log = logging.getLogger("hlas")
+
+
+def setup_logging() -> None:
+    """Write warnings and errors to %APPDATA%\\Hlas\\hlas.log (tray > Open log file)."""
+    try:
+        config_dir().mkdir(parents=True, exist_ok=True)
+        h = logging.handlers.RotatingFileHandler(config_dir() / "hlas.log", maxBytes=500_000, backupCount=1,
+                                                 encoding="utf-8")
+        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        root = logging.getLogger("hlas")
+        root.addHandler(h)
+        root.setLevel(logging.INFO)
+    except OSError:
+        pass
+
 
 LANG_LABEL = {"auto": "SK·DE·EN", "sk": "SK", "de": "DE", "en": "EN"}
 BG, FG, RED, DIM, AMBER, GREEN = "#16161a", "#f4f4f5", "#ef4444", "#a1a1aa", "#f59e0b", "#22c55e"
@@ -153,7 +173,8 @@ class App:
         self.busy = 0
         self.coding = False
         self.tray = None
-        self.models_state = ""  # "", downloading, loading, ready
+        self.models_state = ""  # "", downloading, loading, ready, failed
+        self.models_error = ""
 
         if sys.platform == "win32":
             try:  # crisp text on high-DPI screens
@@ -241,7 +262,9 @@ class App:
         if p == "local":
             if self.models_state == "ready" or (self.models_state == "" and local.models_ready()):
                 return True, ""
-            return False, "Speech models still loading" if self.models_state else "Speech models missing"
+            if self.models_state in ("downloading", "loading"):
+                return False, "Speech models still downloading"
+            return False, "Speech models missing"
         if self.cfg.key(f"{p}_api_key"):
             return True, ""
         return False, f"Add your {p} API key"
@@ -251,6 +274,9 @@ class App:
         dictation is fast."""
         if self.cfg.stt_provider != "local" or self.models_state in ("downloading", "loading", "ready"):
             return
+        self.models_state = "downloading"
+        self.models_error = ""
+        self.events.put(("progress", "Starting model download"))
 
         def work():
             try:
@@ -263,8 +289,10 @@ class App:
                 self.models_state = "ready"
                 self.events.put(("models_ready",))
             except Exception as e:
-                self.models_state = ""
-                self.events.put(("error", f"Model download failed: {e}"[:60]))
+                log.exception("model download failed")
+                self.models_state = "failed"
+                self.models_error = str(e)
+                self.events.put(("models_failed", str(e)))
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -298,6 +326,11 @@ class App:
                 self.pill_show(args[0], "", AMBER)
             if getattr(self, "_models_label", None) is not None and self._models_label.winfo_exists():
                 self._models_label.configure(text=args[0])
+        elif kind == "models_failed":
+            if getattr(self, "_models_label", None) is not None and self._models_label.winfo_exists():
+                self._models_label.configure(text=f"Download failed: {args[0]}"[:120])
+            self.pill_show("Model download failed", "press hotkey to retry", AMBER, hide_after=8)
+            self._refresh_tray()
         elif kind == "models_ready":
             if getattr(self, "_models_label", None) is not None and self._models_label.winfo_exists():
                 self._models_label.configure(text="Ready")
@@ -308,8 +341,11 @@ class App:
                 return
             ok, why = self._stt_ready()
             if not ok:
-                self.pill_show(why, "tray > Settings", AMBER, hide_after=3)
                 self.machine.reset()
+                if self.cfg.stt_provider == "local" and self.models_state in ("", "failed"):
+                    self.prepare_models()  # retry the download
+                    return
+                self.pill_show(why, "tray > Settings", AMBER, hide_after=3)
                 return
             self.coding = self.cfg.context_aware and is_coding_app(foreground_app())
             try:
@@ -368,6 +404,7 @@ class App:
         try:
             result = self.transcriber.transcribe_segments(segments, coding=coding)
         except Exception as e:  # SttError and anything unexpected
+            log.exception("transcription failed")
             self.events.put(("error", str(e)))
             return
         if result.text:
@@ -414,6 +451,9 @@ class App:
             item("Language", pystray.Menu(*lang_items)),
             item("AI cleanup", lambda *a: self._toggle_cleanup(), checked=lambda i: self.cfg.cleanup),
             item("Copy last dictation", lambda *a: self._copy_last()),
+            item("Download speech models", ui(self.prepare_models),
+                 visible=lambda i: self.cfg.stt_provider == "local" and self.models_state != "ready"),
+            item("Open log file", lambda *a: self._open_log()),
             item("Start with Windows", lambda *a: self._toggle_autostart(),
                  checked=lambda i: autostart_enabled(), visible=sys.platform == "win32"),
             pystray.Menu.SEPARATOR,
@@ -443,6 +483,11 @@ class App:
         except OSError:
             pass
         self._refresh_tray()
+
+    def _open_log(self) -> None:
+        path = config_dir() / "hlas.log"
+        if sys.platform == "win32" and path.exists():
+            os.startfile(str(path))  # type: ignore[attr-defined]
 
     def _copy_last(self) -> None:
         if self.last_text:
@@ -514,9 +559,15 @@ class App:
             ("groq", "Groq online (free account)"),
             ("openai", "OpenAI online (paid)"),
             ("elevenlabs", "ElevenLabs online (paid)")]))
-        self._models_label = ttk.Label(frm, text="Ready" if local.models_ready() else "Not downloaded (1.3 GB)",
-                                       foreground="#71717a")
-        add("Offline models", self._models_label)
+        status = ("Ready" if local.models_ready() else
+                  f"Download failed: {self.models_error}"[:120] if self.models_state == "failed" else
+                  "Downloading..." if self.models_state == "downloading" else "Not downloaded (1.3 GB)")
+        models_row = ttk.Frame(frm)
+        self._models_label = ttk.Label(models_row, text=status, foreground="#71717a", wraplength=340)
+        self._models_label.pack(side="left")
+        if not local.models_ready():
+            ttk.Button(models_row, text="Retry download", command=self.prepare_models).pack(side="right", padx=(8, 0))
+        add("Offline models", models_row)
         add("Default language", choice("language", [
             ("auto", "Auto: Slovak / German / English"), ("sk", "Slovak"), ("de", "German"), ("en", "English")]))
 
@@ -581,7 +632,13 @@ class App:
 
 
 def main() -> None:
-    App().run()
+    setup_logging()
+    log.info("Hlas starting")
+    try:
+        App().run()
+    except Exception:
+        log.exception("crash")
+        raise
 
 
 if __name__ == "__main__":

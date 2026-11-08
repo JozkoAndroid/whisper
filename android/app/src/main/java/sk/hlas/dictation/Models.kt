@@ -8,6 +8,11 @@ import java.io.FileOutputStream
 /** The two offline speech models (~1.3 GB), downloaded once. See models/README.md. */
 object Models {
     const val RELEASE = "https://github.com/JozkoAndroid/whisper/releases/download/models-v1/"
+    /** Second source for the base model (same NVIDIA model, converted by the sherpa-onnx author). */
+    const val BASE_MIRROR = "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/main/"
+
+    fun urls(name: String, file: String) =
+        listOf(RELEASE + "parakeet-$name-$file") + if (name == "base") listOf(BASE_MIRROR + file) else emptyList()
     val FILES = listOf("encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt")
     val NAMES = listOf("base", "sk")
 
@@ -41,7 +46,11 @@ object Models {
             val dest = File(dir(root, n), f)
             if (dest.isFile) continue
             dest.parentFile?.mkdirs()
-            fetch(RELEASE + "parakeet-$n-$f", dest, ::report)
+            var error: Exception? = null
+            for (url in urls(n, f)) {
+                try { fetch(url, dest, ::report); error = null; break } catch (e: Exception) { error = e }
+            }
+            error?.let { throw it }
         }
         progress(100)
     }
@@ -49,7 +58,7 @@ object Models {
     internal fun fetch(url: String, dest: File, onBytes: (Long) -> Unit) {
         val part = File(dest.path + ".part")
         var lastError: Exception? = null
-        for (attempt in 0 until 10) {
+        for (attempt in 0 until 15) {
             val have = if (part.exists()) part.length() else 0L
             val req = Request.Builder().url(url).apply { if (have > 0) header("Range", "bytes=$have-") }.build()
             try {
@@ -80,7 +89,7 @@ object Models {
                 throw e
             } catch (e: Exception) {
                 lastError = e
-                Thread.sleep(minOf(30_000L, 1000L shl attempt))
+                Thread.sleep(minOf(10_000L, 1000L * (attempt + 1)))  // GitHub often answers 504 once, then works
             }
         }
         throw SttException("Download failed after several tries (${lastError?.message}). Tap to resume.")

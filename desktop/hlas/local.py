@@ -20,7 +20,9 @@ import os
 import sys
 import threading
 import time
+import logging
 import urllib.error
+import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -31,7 +33,39 @@ import numpy as np
 from . import audio, langid
 from .config import config_dir
 
+log = logging.getLogger("hlas")
+
 RELEASE = "https://github.com/JozkoAndroid/whisper/releases/download/models-v1/"
+# Second source for the base model (same NVIDIA model, converted by the sherpa-onnx author).
+BASE_MIRROR = "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/main/"
+
+
+def urls_for(model: str, file: str) -> list[str]:
+    urls = [RELEASE + f"parakeet-{model}-{file}"]
+    if model == "base":
+        urls.append(BASE_MIRROR + file)
+    return urls
+
+
+_ssl_ctx = None
+
+
+def ssl_context():
+    """System certificates plus certifi's, so downloads work even on PCs with
+    an outdated certificate store."""
+    global _ssl_ctx
+    if _ssl_ctx is None:
+        import ssl
+
+        ctx = ssl.create_default_context()
+        try:
+            import certifi
+
+            ctx.load_verify_locations(certifi.where())
+        except Exception:
+            pass
+        _ssl_ctx = ctx
+    return _ssl_ctx
 FILES = ("encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt")
 MODELS = ("base", "sk")
 
@@ -51,41 +85,52 @@ def models_ready() -> bool:
 TOTAL_BYTES = 1_341_000_000  # approximate, only for the progress display
 
 
-def _fetch(url: str, dest: Path, on_bytes: Callable[[int], None], attempts: int = 10) -> None:
-    """Download url to dest, resuming a partial file and retrying on errors.
-    No HEAD request: GitHub's signed download links only allow GET."""
+def _fetch(urls: list[str], dest: Path, on_bytes: Callable[[int], None], attempts: int = 15) -> None:
+    """Download to dest, resuming a partial file and retrying on errors, then
+    trying the next source. No HEAD request: GitHub's signed links only allow GET."""
     part = dest.with_suffix(dest.suffix + ".part")
-    for attempt in range(attempts):
-        have = part.stat().st_size if part.exists() else 0
-        req = urllib.request.Request(url, headers={"User-Agent": "hlas", **({"Range": f"bytes={have}-"} if have else {})})
-        try:
-            with urllib.request.urlopen(req, timeout=60) as r:
-                resumed = r.status == 206
-                if not resumed and have:
-                    on_bytes(-have)  # server ignored the range: start over
-                    have = 0
-                length = int(r.headers.get("Content-Length") or 0)
-                expected = have + length if length else 0
-                with open(part, "ab" if resumed else "wb") as out:
-                    while True:
-                        chunk = r.read(1 << 20)
-                        if not chunk:
-                            break
-                        out.write(chunk)
-                        on_bytes(len(chunk))
-            if expected and part.stat().st_size != expected:
-                raise OSError("connection closed early")
-            part.replace(dest)
-            return
-        except urllib.error.HTTPError as e:
-            if e.code == 416 and have:  # partial file already complete or broken
-                part.unlink(missing_ok=True)
-            elif e.code < 500 and e.code != 429:
-                raise RuntimeError(f"download failed: HTTP {e.code}") from e
-        except (OSError, TimeoutError):
-            pass
-        time.sleep(min(30, 2 ** attempt))
-    raise RuntimeError("download failed after several tries, check your internet and try again")
+    last = "unknown error"
+    for url in urls:
+        for attempt in range(attempts):
+            have = part.stat().st_size if part.exists() else 0
+            headers = {"User-Agent": "hlas"}
+            if have:
+                headers["Range"] = f"bytes={have}-"
+            try:
+                with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=60,
+                                            context=ssl_context()) as r:
+                    resumed = r.status == 206
+                    if not resumed and have:
+                        on_bytes(-have)  # server ignored the range: start over
+                        have = 0
+                    length = int(r.headers.get("Content-Length") or 0)
+                    expected = have + length if length else 0
+                    with open(part, "ab" if resumed else "wb") as out:
+                        while True:
+                            chunk = r.read(1 << 20)
+                            if not chunk:
+                                break
+                            out.write(chunk)
+                            on_bytes(len(chunk))
+                if expected and part.stat().st_size != expected:
+                    raise OSError("connection closed early")
+                part.replace(dest)
+                return
+            except urllib.error.HTTPError as e:
+                last = f"HTTP {e.code} from {urllib.parse.urlparse(url).netloc}"
+                log.warning("download %s: %s", url, last)
+                if e.code == 416 and have:  # broken partial file: start over
+                    on_bytes(-have)
+                    part.unlink(missing_ok=True)
+                elif e.code < 500 and e.code not in (408, 429):
+                    break  # this source will not work; try the next one
+            except Exception as e:  # network, SSL, timeouts, disk
+                last = f"{type(e).__name__}: {e}"
+                log.warning("download %s: %s", url, last)
+                if isinstance(e, OSError) and getattr(e, "errno", None) == 28:
+                    raise RuntimeError("not enough disk space (need 1.3 GB)") from e
+            time.sleep(min(10, 1 + attempt))  # GitHub often answers 504 once, then works
+    raise RuntimeError(f"could not download {dest.name}: {last}")
 
 
 def download_models(progress: Callable[[float, str], None] | None = None) -> None:
@@ -108,7 +153,7 @@ def download_models(progress: Callable[[float, str], None] | None = None) -> Non
         part = dest.with_suffix(dest.suffix + ".part")
         if part.exists():
             done += part.stat().st_size
-        _fetch(RELEASE + f"parakeet-{m}-{f}", dest, on_bytes)
+        _fetch(urls_for(m, f), dest, on_bytes)
     if progress:
         progress(1.0, "Speech models downloaded")
 
