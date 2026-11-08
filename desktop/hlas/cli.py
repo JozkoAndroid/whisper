@@ -4,6 +4,7 @@
     hlas transcribe FILE         print the text of an audio file
     hlas listen                  record from the mic until Enter, print the text
     hlas serve                   local HTTP API for other projects
+    hlas models                  download the free offline speech models (1.3 GB, once)
     hlas config                  show settings file path and values (keys hidden)
     hlas config set KEY VALUE    change a setting, e.g. hlas config set stt_provider elevenlabs
 """
@@ -62,6 +63,13 @@ def cmd_serve(a) -> int:
     return 0
 
 
+def cmd_models(a) -> int:
+    from . import local
+
+    local.download_cli()
+    return 0
+
+
 def cmd_config(a) -> int:
     cfg = Config.load()
     if a.action == "set":
@@ -115,6 +123,9 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--token", default=None)
     sp.add_argument("--cors", action="store_true", help="allow browser pages to call the API")
     sp.set_defaults(fn=cmd_serve)
+
+    sp = sub.add_parser("models", help="download the offline speech models")
+    sp.set_defaults(fn=cmd_models)
 
     sp = sub.add_parser("config", help="show or change settings")
     sp.add_argument("action", nargs="?", choices=["show", "set"], default="show")

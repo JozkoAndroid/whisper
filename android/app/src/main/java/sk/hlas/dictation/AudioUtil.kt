@@ -72,4 +72,33 @@ object AudioUtil {
             if (end > start) audio.copyOfRange(start, end) to lang else null
         }
     }
+
+    /** Cut at pauses (>= 0.45 s) so each phrase can go to the right language model. */
+    fun splitPhrases(x: ShortArray, minPause: Double = 0.45, minPhrase: Double = 1.5): List<ShortArray> {
+        val e = frameEnergies(x)
+        if (e.isEmpty()) return listOf(x)
+        val cuts = mutableListOf<Int>()
+        var runStart = -1
+        for (i in e.indices) {
+            val quiet = e[i] < THRESHOLD * 2.5
+            if (quiet && runStart < 0) runStart = i
+            else if (!quiet && runStart >= 0) {
+                if ((i - runStart) * FRAME >= minPause * RATE) cuts.add(((runStart + i) / 2) * FRAME)
+                runStart = -1
+            }
+        }
+        val bounds = listOf(0) + cuts + listOf(x.size)
+        val merged = mutableListOf<ShortArray>()
+        for (k in 0 until bounds.size - 1) {
+            val p = x.copyOfRange(bounds[k], bounds[k + 1])
+            if (p.isEmpty()) continue
+            if (merged.isNotEmpty() && p.size < minPhrase * RATE) merged[merged.size - 1] = merged.last() + p
+            else merged.add(p)
+        }
+        if (merged.size > 1 && merged[0].size < minPhrase * RATE) {
+            merged[1] = merged[0] + merged[1]
+            merged.removeAt(0)
+        }
+        return merged
+    }
 }

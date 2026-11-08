@@ -7,7 +7,7 @@ class Prefs(context: Context) {
     private val p = context.getSharedPreferences("hlas", Context.MODE_PRIVATE)
 
     var provider: String
-        get() = p.getString("provider", "openai") ?: "openai"
+        get() = p.getString("provider", "local") ?: "local"
         set(v) = p.edit().putString("provider", v).apply()
     var openaiKey: String
         get() = p.getString("openai_key", "") ?: ""
@@ -21,6 +21,10 @@ class Prefs(context: Context) {
     var anthropicKey: String
         get() = p.getString("anthropic_key", "") ?: ""
         set(v) = p.edit().putString("anthropic_key", v.trim()).apply()
+    /** groq (free account) or claude (paid). */
+    var cleanupProvider: String
+        get() = p.getString("cleanup_provider", "groq") ?: "groq"
+        set(v) = p.edit().putString("cleanup_provider", v).apply()
     var cleanup: Boolean
         get() = p.getBoolean("cleanup", true)
         set(v) = p.edit().putBoolean("cleanup", v).apply()
@@ -37,6 +41,7 @@ class Prefs(context: Context) {
     val languages: List<String> get() = listOf("sk", "de", "en")
 
     fun sttKey(): String = when (provider) {
+        "local" -> "local"
         "elevenlabs" -> elevenlabsKey
         "groq" -> groqKey
         else -> openaiKey
@@ -44,7 +49,8 @@ class Prefs(context: Context) {
 
     companion object {
         val LANGS = listOf("auto", "sk", "de", "en")
-        val PROVIDERS = listOf("openai", "elevenlabs", "groq")
+        val PROVIDERS = listOf("local", "groq", "openai", "elevenlabs")
+        val CLEANUP_PROVIDERS = listOf("groq", "claude")
         fun label(lang: String) = if (lang == "auto") "SK·DE·EN" else lang.uppercase()
     }
 }

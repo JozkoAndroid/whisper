@@ -42,6 +42,26 @@ class HlasIme : InputMethodService() {
         super.onCreate()
         prefs = Prefs(this)
         lang = prefs.language
+        preloadModels()
+    }
+
+    /** Load the offline models in the background so the first dictation is fast. */
+    private fun preloadModels() {
+        if (prefs.provider == "local" && Models.ready(this)) {
+            worker.execute { runCatching { LocalEngine.preload(Models.root(this)) } }
+        }
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        // The system is about to kill us: free the ~1.3 GB of models (reloaded on next use).
+        if (level >= TRIM_MEMORY_COMPLETE && !recorder.recording && !busy) LocalEngine.release()
+    }
+
+    private fun notReadyReason(): String? = when {
+        prefs.provider == "local" && !Models.ready(this) -> "Download the offline models in settings"
+        prefs.sttKey().isEmpty() -> "Add an API key in settings"
+        else -> null
     }
 
     override fun onCreateInputView(): View {
@@ -68,6 +88,7 @@ class HlasIme : InputMethodService() {
         super.onStartInputView(info, restarting)
         prefs = Prefs(this)
         coding = info?.packageName in CODING_APPS
+        preloadModels()
         if (!recorder.recording) lang = prefs.language
         refresh()
     }
@@ -109,8 +130,8 @@ class HlasIme : InputMethodService() {
             openSettings()
             return false
         }
-        if (prefs.sttKey().isEmpty()) {
-            status("Add an API key in settings")
+        notReadyReason()?.let {
+            status(it)
             openSettings()
             return false
         }
@@ -148,7 +169,7 @@ class HlasIme : InputMethodService() {
         val p = prefs
         val c = coding
         worker.execute {
-            val result = runCatching { Pipeline.run(segments, p, c) }
+            val result = runCatching { Pipeline.run(applicationContext, segments, p, c) }
             main.post {
                 busy = false
                 result.onSuccess { text ->
@@ -234,7 +255,7 @@ class HlasIme : InputMethodService() {
     private fun refresh() {
         langView?.text = Prefs.label(lang)
         if (!recorder.recording && !busy) {
-            status(if (prefs.sttKey().isEmpty()) "Add an API key in settings" else "Tap or hold to talk")
+            status(notReadyReason() ?: "Tap or hold to talk")
         }
     }
 

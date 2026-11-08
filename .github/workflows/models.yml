@@ -1,0 +1,61 @@
+# Converts the two open speech models to the offline format used by the apps
+# and publishes them as the "models-v1" release, where the apps download them.
+# Runs once (skips if the release already has the files).
+name: models
+
+on:
+  push:
+    paths: ["models/**", ".github/workflows/models.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: models-v1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Already published?
+        id: check
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets -q '.assets[].name' 2>/dev/null \
+              | grep -q parakeet-sk-encoder.int8.onnx; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Free disk space
+        if: steps.check.outputs.skip != 'true'
+        run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+      - uses: actions/setup-python@v5
+        if: steps.check.outputs.skip != 'true'
+        with:
+          python-version: "3.12"
+      - name: Install NeMo (CPU)
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install "nemo_toolkit[asr]" onnx onnxruntime
+      - name: Export
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          set -e
+          mkdir -p work dist
+          curl -sSL -o work/base.nemo https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3/resolve/main/parakeet-tdt-0.6b-v3.nemo
+          python models/export_parakeet.py work/base.nemo "$PWD/out/base" https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3
+          rm work/base.nemo
+          curl -sSL -o work/sk.nemo https://huggingface.co/kinit/parakeet-tdt-0.6b-v3-sk/resolve/main/parakeet-tdt-0.6b-v3-sk.nemo
+          python models/export_parakeet.py work/sk.nemo "$PWD/out/sk" https://huggingface.co/kinit/parakeet-tdt-0.6b-v3-sk
+          for m in base sk; do for f in out/$m/*; do cp "$f" "dist/parakeet-$m-$(basename "$f")"; done; done
+          ls -lh dist
+      - name: Publish release
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Speech models v1" \
+              --notes "Offline speech models used by Hlas (converted to ONNX int8 for sherpa-onnx).
+          - parakeet-base-*: NVIDIA Parakeet TDT 0.6B v3, CC-BY-4.0, https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3
+          - parakeet-sk-*: KInIT Slovak fine-tune, CC-BY-4.0, https://huggingface.co/kinit/parakeet-tdt-0.6b-v3-sk"
+          gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber

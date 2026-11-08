@@ -25,7 +25,7 @@ def test_openai_gpt_transcribe_sends_languages_and_keywords(monkeypatch):
         return httpx.Response(200, json={"text": " Ahoj, wie geht's? ", "languages": [{"code": "sk"}]})
 
     mock(monkeypatch, handler)
-    cfg = Config(openai_api_key="sk-test", vocabulary=["Hlas", "bad<term>"])
+    cfg = Config(stt_provider="openai", openai_api_key="sk-test", vocabulary=["Hlas", "bad<term>"])
     text, lang = stt.transcribe(b"RIFF....", "auto", cfg)
     assert text == "Ahoj, wie geht's?" and lang == "sk"
     assert seen["url"].endswith("/v1/audio/transcriptions")
@@ -41,7 +41,7 @@ def test_openai_gpt_transcribe_sends_languages_and_keywords(monkeypatch):
 def test_openai_forced_language(monkeypatch):
     seen = {}
     mock(monkeypatch, lambda r: (seen.setdefault("b", form(r)), httpx.Response(200, json={"text": "Hallo"}))[1])
-    stt.transcribe(b"x", "de", Config(openai_api_key="k"))
+    stt.transcribe(b"x", "de", Config(stt_provider="openai", openai_api_key="k"))
     assert seen["b"].count('name="languages[]"') == 1 and 'languages[]"\r\n\r\nde' in seen["b"]
 
 
@@ -77,7 +77,7 @@ def test_groq_retries_czech_as_slovak(monkeypatch):
 def test_errors(monkeypatch):
     mock(monkeypatch, lambda r: httpx.Response(401, json={}))
     with pytest.raises(stt.SttError, match="invalid API key"):
-        stt.transcribe(b"x", "auto", Config(openai_api_key="bad"))
+        stt.transcribe(b"x", "auto", Config(stt_provider="openai", openai_api_key="bad"))
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     with pytest.raises(stt.SttError, match="missing"):
-        stt.transcribe(b"x", "auto", Config())
+        stt.transcribe(b"x", "auto", Config(stt_provider="openai"))

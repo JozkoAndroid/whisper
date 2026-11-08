@@ -61,6 +61,7 @@ object Stt {
         val key = prefs.sttKey()
         if (key.isEmpty()) throw SttException("Add an API key in Hlas settings")
         return when (prefs.provider) {
+            "local" -> throw SttException("offline mode does not upload audio")
             "elevenlabs" -> elevenlabs(wav, lang, key, prefs)
             "groq" -> groq(wav, lang, key, prefs)
             else -> openai(wav, lang, key, prefs)

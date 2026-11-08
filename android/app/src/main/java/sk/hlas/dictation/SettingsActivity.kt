@@ -25,7 +25,8 @@ class SettingsActivity : Activity() {
 
         val provider = findViewById<Spinner>(R.id.provider)
         provider.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
-            listOf("OpenAI gpt-transcribe (best for mixing)", "ElevenLabs Scribe v2", "Groq Whisper (fastest)"))
+            listOf("Offline on this phone (free, best for Slovak)", "Groq online (free account)",
+                "OpenAI online (paid)", "ElevenLabs online (paid)"))
         provider.setSelection(Prefs.PROVIDERS.indexOf(prefs.provider).coerceAtLeast(0))
 
         val language = findViewById<Spinner>(R.id.language)
@@ -39,6 +40,32 @@ class SettingsActivity : Activity() {
         val anthropic = findViewById<EditText>(R.id.anthropic_key).apply { setText(prefs.anthropicKey) }
         val model = findViewById<EditText>(R.id.cleanup_model).apply { setText(prefs.cleanupModel) }
         val cleanup = findViewById<CheckBox>(R.id.cleanup).apply { isChecked = prefs.cleanup }
+        val cleanupWith = findViewById<Spinner>(R.id.cleanup_provider)
+        cleanupWith.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
+            listOf("Groq (free account)", "Claude (paid)"))
+        cleanupWith.setSelection(Prefs.CLEANUP_PROVIDERS.indexOf(prefs.cleanupProvider).coerceAtLeast(0))
+
+        val download = findViewById<Button>(R.id.btn_models)
+        fun showModels() {
+            download.text = if (Models.ready(this)) "Offline models ready ✓" else "Download offline models (1.3 GB, Wi-Fi)"
+            download.isEnabled = !Models.ready(this)
+        }
+        showModels()
+        download.setOnClickListener {
+            download.isEnabled = false
+            Thread {
+                try {
+                    Models.download(this) { pct -> runOnUiThread { download.text = "Downloading… $pct%" } }
+                    runOnUiThread { showModels(); Toast.makeText(this, "Offline models ready", Toast.LENGTH_SHORT).show() }
+                } catch (e: Exception) {
+                    runOnUiThread {
+                        download.isEnabled = true
+                        download.text = "Download failed, tap to resume"
+                        Toast.makeText(this, e.message ?: "Download failed", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }.start()
+        }
         val vocab = findViewById<EditText>(R.id.vocabulary).apply { setText(prefs.vocabulary.joinToString("\n")) }
 
         findViewById<Button>(R.id.btn_mic).setOnClickListener {
@@ -59,6 +86,7 @@ class SettingsActivity : Activity() {
             prefs.anthropicKey = anthropic.text.toString()
             prefs.cleanupModel = model.text.toString().ifBlank { "claude-opus-5-5" }
             prefs.cleanup = cleanup.isChecked
+            prefs.cleanupProvider = Prefs.CLEANUP_PROVIDERS[cleanupWith.selectedItemPosition]
             prefs.vocabulary = vocab.text.toString().lines()
             Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show()
         }

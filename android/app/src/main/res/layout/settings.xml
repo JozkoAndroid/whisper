@@ -30,15 +30,13 @@
             android:text="2. Enable Hlas keyboard" />
         <Button android:id="@+id/btn_pick" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:text="3. Switch to Hlas keyboard" />
+        <Button android:id="@+id/btn_models" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="4. Download offline models" />
 
         <TextView style="@style/Label" android:text="Speech model" />
         <Spinner android:id="@+id/provider" android:layout_width="match_parent" android:layout_height="wrap_content" />
 
-        <TextView style="@style/Label" android:text="OpenAI API key (speech, recommended)" />
-        <EditText android:id="@+id/openai_key" style="@style/Secret" />
-        <TextView style="@style/Label" android:text="ElevenLabs API key (optional)" />
-        <EditText android:id="@+id/elevenlabs_key" style="@style/Secret" />
-        <TextView style="@style/Label" android:text="Groq API key (optional)" />
+        <TextView style="@style/Label" android:text="Groq API key (free at console.groq.com; used for cleanup)" />
         <EditText android:id="@+id/groq_key" style="@style/Secret" />
 
         <TextView style="@style/Label" android:text="Default language" />
@@ -46,9 +44,17 @@
 
         <CheckBox android:id="@+id/cleanup" android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:layout_marginTop="16dp" android:text="AI cleanup (fix mistakes, punctuation, filler words)" />
-        <TextView style="@style/Label" android:text="Anthropic API key (for cleanup)" />
+        <TextView style="@style/Label" android:text="Cleanup with" />
+        <Spinner android:id="@+id/cleanup_provider" android:layout_width="match_parent" android:layout_height="wrap_content" />
+
+        <TextView style="@style/Label" android:layout_marginTop="24dp" android:text="Paid services (optional)" android:textSize="16sp" />
+        <TextView style="@style/Label" android:text="OpenAI API key" />
+        <EditText android:id="@+id/openai_key" style="@style/Secret" />
+        <TextView style="@style/Label" android:text="ElevenLabs API key" />
+        <EditText android:id="@+id/elevenlabs_key" style="@style/Secret" />
+        <TextView style="@style/Label" android:text="Anthropic API key (Claude cleanup)" />
         <EditText android:id="@+id/anthropic_key" style="@style/Secret" />
-        <TextView style="@style/Label" android:text="Cleanup model (claude-haiku-5-5 is fastest)" />
+        <TextView style="@style/Label" android:text="Claude model (claude-haiku-5-5 is fastest)" />
         <EditText android:id="@+id/cleanup_model" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:inputType="text" android:singleLine="true" />
 
@@ -68,7 +74,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="Tap the mic to talk hands-free, tap again to finish. Or hold the mic and release. Tap the language chip while talking to switch language from that point on. Keys are stored only on this phone."
+            android:text="Free setup: download the offline models (step 4). Optional: a free Groq key for text cleanup. Tap the mic to talk hands-free, tap again to finish, or hold and release. Tap the language chip while talking to switch language. Offline models: NVIDIA Parakeet TDT 0.6B v3 and KInIT parakeet-tdt-0.6b-v3-sk (CC-BY-4.0). Keys stay on this phone."
             android:textColor="#52525B" />
     </LinearLayout>
 </ScrollView>

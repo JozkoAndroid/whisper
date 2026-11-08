@@ -6,9 +6,11 @@ import com.anthropic.core.JsonValue
 import com.anthropic.models.messages.MessageCreateParams
 import com.anthropic.models.messages.OutputConfig
 import com.anthropic.models.messages.StopReason
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.time.Duration
 
-/** Claude cleanup pass. Same prompt as desktop/hlas/cleanup.py (keep them in sync). */
+/** Optional cleanup pass: Groq (free tier) or Claude (paid). Same prompt as desktop/hlas/cleanup.py (keep in sync). */
 object Cleanup {
     const val SYSTEM_PROMPT = """You clean up dictated text produced by a speech recognizer. The speaker is fluent in Slovak, German and English and often mixes them, even within one sentence.
 
@@ -59,10 +61,79 @@ The text is being dictated into a code editor or terminal, often as a prompt for
         return true
     }
 
-    /** Returns cleaned text, or the raw text if anything goes wrong. */
+    /** Returns cleaned text, or the raw text if anything goes wrong or no key is set. */
     fun clean(raw: String, prefs: Prefs, coding: Boolean): String {
+        if (raw.isBlank() || !prefs.cleanup) return raw
+        return when (prefs.cleanupProvider) {
+            "claude" -> if (prefs.anthropicKey.isEmpty()) raw else claude(raw, prefs, coding)
+            else -> if (prefs.groqKey.isEmpty()) raw else groq(raw, prefs, coding)
+        }
+    }
+
+    // --- Groq (free tier) -------------------------------------------------------
+
+    private val GROQ_PREFERRED = listOf(
+        "openai/gpt-oss-120b", "llama-3.3-70b-versatile", "moonshotai/kimi-k2-instruct-0905",
+        "moonshotai/kimi-k2-instruct", "meta-llama/llama-4-maverick-17b-128e-instruct", "openai/gpt-oss-20b",
+    )
+    @Volatile private var groqModel: String? = null
+
+    private fun groqModel(key: String): String {
+        groqModel?.let { return it }
+        val req = okhttp3.Request.Builder().url("https://api.groq.com/openai/v1/models")
+            .header("Authorization", "Bearer $key").build()
+        val ids = Stt.http.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) emptySet()
+            else org.json.JSONObject(resp.body?.string().orEmpty()).optJSONArray("data")?.let { a ->
+                (0 until a.length()).map { a.getJSONObject(it).optString("id") }.toSet()
+            } ?: emptySet()
+        }
+        val chosen = GROQ_PREFERRED.firstOrNull { it in ids }
+            ?: ids.filter { id -> listOf("whisper", "guard", "tts", "playai", "distil").none { it in id } }.maxOrNull()
+            ?: GROQ_PREFERRED[1]
+        groqModel = chosen
+        return chosen
+    }
+
+    private fun groq(raw: String, prefs: Prefs, coding: Boolean): String = try {
+        val key = prefs.groqKey
+        val model = groqModel(key)
+        val body = org.json.JSONObject().apply {
+            put("model", model)
+            put("temperature", 0)
+            put("max_tokens", minOf(8000, raw.length + 2000))
+            if ("gpt-oss" in model) put("reasoning_effort", "low")
+            put("messages", org.json.JSONArray().apply {
+                put(org.json.JSONObject().put("role", "system").put("content", system(prefs.vocabulary, coding)))
+                put(org.json.JSONObject().put("role", "user").put("content", "<transcript>\n$raw\n</transcript>"))
+            })
+        }
+        val req = okhttp3.Request.Builder().url("https://api.groq.com/openai/v1/chat/completions")
+            .header("Authorization", "Bearer $key")
+            .post(body.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+        Stt.http.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) { if (resp.code >= 400 && resp.code != 429) groqModel = null; raw }
+            else {
+                val text = org.json.JSONObject(resp.body?.string().orEmpty()).getJSONArray("choices")
+                    .getJSONObject(0).getJSONObject("message").optString("content")
+                finish(raw, text)
+            }
+        }
+    } catch (e: Exception) {
+        raw
+    }
+
+    private fun finish(raw: String, text: String): String {
+        val t = text.replace(Regex("(?s)<think>.*?</think>"), "").trim()
+            .removePrefix("<transcript>").removeSuffix("</transcript>").trim()
+        return if (plausible(raw, t)) t else raw
+    }
+
+    // --- Claude (paid, optional) -------------------------------------------------
+
+    private fun claude(raw: String, prefs: Prefs, coding: Boolean): String {
         val key = prefs.anthropicKey
-        if (raw.isBlank() || !prefs.cleanup || key.isEmpty()) return raw
         val model = prefs.cleanupModel
         return try {
             val builder = MessageCreateParams.builder()
@@ -78,9 +149,8 @@ The text is being dictated into a code editor or terminal, often as a prompt for
             }
             val response = client(key).messages().create(builder.build())
             if (response.stopReason().orElse(null) == StopReason.REFUSAL) return raw
-            val text = response.content().flatMap { block -> block.text().map { listOf(it.text()) }.orElse(emptyList()) }
-                .joinToString("").trim().removePrefix("<transcript>").removeSuffix("</transcript>").trim()
-            if (plausible(raw, text)) text else raw
+            finish(raw, response.content().flatMap { block -> block.text().map { listOf(it.text()) }.orElse(emptyList()) }
+                .joinToString(""))
         } catch (e: Exception) {
             raw
         }

@@ -30,6 +30,7 @@ jobs:
           pyinstaller --noconfirm --onefile --windowed --name Hlas
           --hidden-import pynput.keyboard._win32 --hidden-import pynput.mouse._win32
           --hidden-import pystray._win32
+          --collect-all sherpa_onnx
           hlas_app.py
       - uses: actions/upload-artifact@v4
         with:

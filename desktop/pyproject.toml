@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "hlas"
 version = "0.1.0"
-description = "Push-to-talk dictation for Slovak, German and English (with mixing), plus an AI cleanup pass."
-readme = "../README.md"
+description = "Free push-to-talk dictation for Slovak, German and English (with mixing)."
 requires-python = ">=3.10"
 dependencies = [
-    "anthropic>=2.6",      # Claude cleanup pass (brings httpx2, used for STT calls too)
+    "sherpa-onnx>=2.0",    # offline speech recognition (free, default)
     "numpy>=1.26",
+    "anthropic>=2.6",      # optional paid Claude cleanup; also brings httpx2 used for HTTP calls
 ]
 
 [project.optional-dependencies]
@@ -22,8 +22,6 @@ app = [
     "pystray>=0.19",
     "pillow>=10",
 ]
-# Offline transcription with faster-whisper (large-v3). Slower and less accurate than the cloud models.
-local = ["faster-whisper>=1.0"]
 dev = ["pytest>=8"]
 
 [project.scripts]

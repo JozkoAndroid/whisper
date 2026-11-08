@@ -1,10 +1,10 @@
 """Speech-to-text providers.
 
-openai      gpt-transcribe, takes a *list* of expected languages, which is what
-            makes Slovak/German/English mixing in one sentence work. Default.
-elevenlabs  Scribe v2, very strong on European languages; good second choice.
-groq        Whisper large-v3 on Groq: the fastest, cheapest, weakest at mixing.
-local       faster-whisper on your own machine: offline, needs a good GPU to be fast.
+local       FREE, offline. Parakeet v3 + KInIT's Slovak fine-tune, routed per
+            phrase (see local.py). Default.
+groq        FREE tier (free account). Whisper large-v3 hosted by Groq.
+openai      paid. gpt-transcribe, takes a list of expected languages.
+elevenlabs  paid. Scribe v2.
 
 Each provider takes 16 kHz mono WAV bytes and returns (text, language).
 """
@@ -15,7 +15,6 @@ import re
 import threading
 
 import httpx2 as httpx
-import numpy as np
 
 from .config import Config
 
@@ -192,40 +191,19 @@ def transcribe_groq(wav: bytes, lang: str, cfg: Config, filename: str = "audio.w
     return (body.get("text") or "").strip(), detected
 
 
-_local_model = None
-_local_lock = threading.Lock()
-
-
 def transcribe_local(wav: bytes, lang: str, cfg: Config, filename: str = "audio.wav",
                      mime: str = "audio/wav") -> tuple[str, str]:
-    try:
-        from faster_whisper import WhisperModel
-    except ImportError as e:
-        raise SttError("Local mode needs: pip install hlas[local]") from e
+    """Free, offline: Parakeet base + Slovak models (see local.py)."""
+    from . import local
     from .audio import from_wav
 
     if not wav.startswith(b"RIFF"):
-        raise SttError("Local mode accepts WAV audio only")
-
-    global _local_model
-    with _local_lock:
-        if _local_model is None:
-            _local_model = WhisperModel(cfg.local_model, device="auto", compute_type="default")
-        model = _local_model
-    audio = from_wav(wav).astype(np.float32) / 32768.0
-    vocab = ", ".join(_clean_terms(cfg.vocabulary, 40))
-    prompt = "Slovenčina, Deutsch, English." + (f" {vocab}." if vocab else "")
-    language = lang if lang != "auto" else None
-    if language is None:
-        # Restrict detection to our three languages (Whisper likes to say Czech).
-        _, _, probs = model.detect_language(audio)  # type: ignore[attr-defined]
-        allowed = [(p, l) for l, p in probs if l in cfg.languages]
-        language = max(allowed)[1] if allowed else cfg.languages[0]
-    kwargs = dict(language=language, initial_prompt=prompt, beam_size=5, vad_filter=True,
-                  condition_on_previous_text=False)
-    segments, info = model.transcribe(audio, **kwargs)
-    text = " ".join(s.text.strip() for s in segments)
-    return text.strip(), language
+        raise SttError("Offline mode accepts WAV audio only")
+    try:
+        text, langs = local.engine().transcribe(from_wav(wav), lang, cfg.vocabulary)
+    except local.ModelMissing as e:
+        raise SttError(f"{e} (run: hlas models)") from e
+    return text, ",".join(langs) or lang
 
 
 PROVIDERS = {

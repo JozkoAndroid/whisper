@@ -15,15 +15,15 @@ import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from . import audio, stt
-from .config import LANGS, STT_PROVIDERS, Config, config_dir
+from . import audio, local, stt
+from .config import LANGS, Config, config_dir
 from .context import foreground_app, is_coding_app
 from .hotkey import GlobalHotkey, HotkeyMachine, parse_combo
 from .insert import paste_text
 from .pipeline import Transcriber
 
 LANG_LABEL = {"auto": "SK·DE·EN", "sk": "SK", "de": "DE", "en": "EN"}
-BG, FG, RED, DIM, AMBER = "#16161a", "#f4f4f5", "#ef4444", "#a1a1aa", "#f59e0b"
+BG, FG, RED, DIM, AMBER, GREEN = "#16161a", "#f4f4f5", "#ef4444", "#a1a1aa", "#f59e0b", "#22c55e"
 
 
 # --- small platform helpers -------------------------------------------------
@@ -153,6 +153,7 @@ class App:
         self.busy = 0
         self.coding = False
         self.tray = None
+        self.models_state = ""  # "", downloading, loading, ready
 
         if sys.platform == "win32":
             try:  # crisp text on high-DPI screens
@@ -230,13 +231,42 @@ class App:
         self.hotkey.start()
         self._start_tray()
         self.root.after(30, self._tick)
-        if not self._has_stt_key():
+        if self.cfg.stt_provider != "local" and not self._stt_ready()[0]:
             self.root.after(300, self.open_settings)
+        self.prepare_models()
         self.root.mainloop()
 
-    def _has_stt_key(self) -> bool:
+    def _stt_ready(self) -> tuple[bool, str]:
         p = self.cfg.stt_provider
-        return p == "local" or bool(self.cfg.key(f"{p}_api_key"))
+        if p == "local":
+            if self.models_state == "ready" or (self.models_state == "" and local.models_ready()):
+                return True, ""
+            return False, "Speech models still loading" if self.models_state else "Speech models missing"
+        if self.cfg.key(f"{p}_api_key"):
+            return True, ""
+        return False, f"Add your {p} API key"
+
+    def prepare_models(self) -> None:
+        """Offline mode: download the models once, then load them so the first
+        dictation is fast."""
+        if self.cfg.stt_provider != "local" or self.models_state in ("downloading", "loading", "ready"):
+            return
+
+        def work():
+            try:
+                if not local.models_ready():
+                    self.models_state = "downloading"
+                    local.download_models(lambda frac, msg: self.events.put(("progress", msg)))
+                    self.events.put(("progress", "Speech models downloaded"))
+                self.models_state = "loading"
+                local.engine().preload()
+                self.models_state = "ready"
+                self.events.put(("models_ready",))
+            except Exception as e:
+                self.models_state = ""
+                self.events.put(("error", f"Model download failed: {e}"[:60]))
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _tick(self) -> None:
         try:
@@ -263,11 +293,22 @@ class App:
     def _handle(self, kind: str, *args) -> None:
         if kind == "ui":
             args[0]()
+        elif kind == "progress":
+            if not self.recorder.recording and not self.busy:
+                self.pill_show(args[0], "", AMBER)
+            if getattr(self, "_models_label", None) is not None and self._models_label.winfo_exists():
+                self._models_label.configure(text=args[0])
+        elif kind == "models_ready":
+            if getattr(self, "_models_label", None) is not None and self._models_label.winfo_exists():
+                self._models_label.configure(text="Ready")
+            if not self.recorder.recording and not self.busy:
+                self.pill_show("Ready", "hold " + self.cfg.hotkey.replace("cmd", "win"), GREEN, hide_after=2.5)
         elif kind == "start":
             if self.recorder.recording:
                 return
-            if not self._has_stt_key():
-                self.pill_show("Add an API key", "tray > Settings", AMBER, hide_after=3)
+            ok, why = self._stt_ready()
+            if not ok:
+                self.pill_show(why, "tray > Settings", AMBER, hide_after=3)
                 self.machine.reset()
                 return
             self.coding = self.cfg.context_aware and is_coding_app(foreground_app())
@@ -452,18 +493,49 @@ class App:
             v[name] = tk.BooleanVar(value=bool(getattr(cfg, name)))
             return ttk.Checkbutton(frm, text=text, variable=v[name])
 
-        add("Speech model", combo("stt_provider", STT_PROVIDERS), "openai = most accurate for mixing")
-        add("OpenAI API key", entry("openai_api_key", "*"))
-        add("ElevenLabs API key", entry("elevenlabs_api_key", "*"), "optional")
-        add("Groq API key", entry("groq_api_key", "*"), "optional")
-        add("Default language", combo("language", LANGS), "auto = SK/DE/EN mixed")
-        ttk.Separator(frm).grid(row=row, column=0, columnspan=3, sticky="ew", pady=8)
-        row += 1
-        add("AI cleanup", check("cleanup", "Fix mistakes, punctuation and filler words"))
-        add("Anthropic API key", entry("anthropic_api_key", "*"), "for cleanup")
-        add("Cleanup model", ttk.Combobox(frm, textvariable=v.setdefault("cleanup_model", tk.StringVar(
-            value=cfg.cleanup_model)), values=["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"],
-            width=42), "haiku = fastest")
+        def choice(name, options):  # options: [(value, label)]
+            labels = [l for _, l in options]
+            current = dict(options).get(getattr(cfg, name), labels[0])
+            var = tk.StringVar(value=current)
+            v[name] = var
+            choices[name] = {l: val for val, l in options}
+            return ttk.Combobox(frm, textvariable=var, values=labels, state="readonly", width=42)
+
+        def section(title):
+            nonlocal row
+            ttk.Label(frm, text=title, font=("Segoe UI", 10, "bold")).grid(
+                row=row, column=0, columnspan=3, sticky="w", pady=(12, 2))
+            row += 1
+
+        choices: dict[str, dict[str, str]] = {}
+        section("Speech recognition")
+        add("Engine", choice("stt_provider", [
+            ("local", "Offline on this PC (free, best for Slovak)"),
+            ("groq", "Groq online (free account)"),
+            ("openai", "OpenAI online (paid)"),
+            ("elevenlabs", "ElevenLabs online (paid)")]))
+        self._models_label = ttk.Label(frm, text="Ready" if local.models_ready() else "Not downloaded (1.3 GB)",
+                                       foreground="#71717a")
+        add("Offline models", self._models_label)
+        add("Default language", choice("language", [
+            ("auto", "Auto: Slovak / German / English"), ("sk", "Slovak"), ("de", "German"), ("en", "English")]))
+
+        section("Text cleanup (fixes mistakes, punctuation, filler words)")
+        add("Cleanup", check("cleanup", "On"))
+        add("Cleanup with", choice("cleanup_provider", [
+            ("auto", "Automatic (Groq if key set, else Ollama)"),
+            ("groq", "Groq online (free account)"),
+            ("ollama", "Ollama on this PC (free, offline)"),
+            ("claude", "Claude (paid)")]))
+        add("Ollama model", entry("ollama_model"), "e.g. gemma3:12b")
+
+        section("Keys (Groq is free: console.groq.com)")
+        add("Groq API key", entry("groq_api_key", "*"), "free")
+        add("OpenAI API key", entry("openai_api_key", "*"), "paid, optional")
+        add("ElevenLabs API key", entry("elevenlabs_api_key", "*"), "paid, optional")
+        add("Anthropic API key", entry("anthropic_api_key", "*"), "paid, optional")
+
+        section("App")
         add("Coding style in IDEs", check("context_aware", "Detect editors and terminals"))
         ttk.Separator(frm).grid(row=row, column=0, columnspan=3, sticky="ew", pady=8)
         row += 1
@@ -486,7 +558,10 @@ class App:
 
         def save():
             for name, var in v.items():
-                setattr(cfg, name, var.get())
+                value = var.get()
+                if name in choices:
+                    value = choices[name].get(value, value)
+                setattr(cfg, name, value)
             cfg.vocabulary = [l.strip() for l in vocab.get("1.0", "end").splitlines() if l.strip()]
             cfg.validate()
             cfg.save()
@@ -495,6 +570,7 @@ class App:
             self.machine.reset()
             self._refresh_tray()
             win.destroy()
+            self.prepare_models()
 
         btns = ttk.Frame(frm)
         btns.grid(row=row, column=0, columnspan=3, sticky="e", pady=(14, 0))

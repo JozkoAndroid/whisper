@@ -1,0 +1,192 @@
+"""Offline, free speech recognition with two open models (via sherpa-onnx):
+
+  base  NVIDIA Parakeet TDT 0.6B v3 (25 European languages, CC-BY-4.0).
+        Very good at English and German, but tends to write Slovak as Polish.
+  sk    KInIT's Slovak fine-tune of the same model (CC-BY-4.0). About 4x fewer
+        errors on real Slovak speech than the base model, but it can no longer
+        do English or German.
+
+So the audio is cut into phrases at pauses, both models transcribe each phrase
+(in parallel), and the output that reads like real text wins: Slovak from the
+Slovak model, English/German from the base model. That handles switching
+languages between phrases. Both models are fast on an ordinary CPU.
+
+Models (~1.3 GB) are downloaded once into the Hlas folder.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+import threading
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import Callable
+
+import numpy as np
+
+from . import audio, langid
+from .config import config_dir
+
+RELEASE = "https://github.com/JozkoAndroid/whisper/releases/download/models-v1/"
+FILES = ("encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt")
+MODELS = ("base", "sk")
+
+
+class ModelMissing(RuntimeError):
+    pass
+
+
+def model_dir(name: str) -> Path:
+    return config_dir() / "models" / f"parakeet-{name}"
+
+
+def models_ready() -> bool:
+    return all((model_dir(m) / f).is_file() for m in MODELS for f in FILES)
+
+
+def download_models(progress: Callable[[float, str], None] | None = None) -> None:
+    """Download any missing model files. progress(fraction 0..1, message)."""
+    todo = [(m, f) for m in MODELS for f in FILES if not (model_dir(m) / f).is_file()]
+    if not todo:
+        return
+    sizes = {}
+    for m, f in todo:
+        req = urllib.request.Request(RELEASE + f"parakeet-{m}-{f}", method="HEAD")
+        with urllib.request.urlopen(req, timeout=30) as r:
+            sizes[(m, f)] = int(r.headers.get("Content-Length") or 0)
+    total = max(1, sum(sizes.values()))
+    done = 0
+    for m, f in todo:
+        dest = model_dir(m) / f
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        part = dest.with_suffix(dest.suffix + ".part")
+        with urllib.request.urlopen(RELEASE + f"parakeet-{m}-{f}", timeout=60) as r, open(part, "wb") as out:
+            while True:
+                chunk = r.read(1 << 20)
+                if not chunk:
+                    break
+                out.write(chunk)
+                done += len(chunk)
+                if progress:
+                    progress(done / total, f"Downloading speech models {done * 100 // total}%")
+        if sizes[(m, f)] and part.stat().st_size != sizes[(m, f)]:
+            part.unlink(missing_ok=True)
+            raise RuntimeError(f"download of {f} was incomplete, try again")
+        part.replace(dest)
+
+
+def split_phrases(x: np.ndarray, min_pause: float = 0.45, min_phrase: float = 1.5) -> list[np.ndarray]:
+    """Cut at pauses so each phrase can be routed to the right language model."""
+    win = audio.SAMPLE_RATE // 50
+    n = len(x) // win
+    if n == 0:
+        return [x]
+    energy = np.sqrt(np.mean(x[: n * win].astype(np.float32).reshape(n, win) ** 2, axis=1))
+    quiet = energy < 120.0 * 2.5
+    cuts, run_start = [], None
+    for i, q in enumerate(quiet):
+        if q and run_start is None:
+            run_start = i
+        elif not q and run_start is not None:
+            if (i - run_start) * win >= min_pause * audio.SAMPLE_RATE:
+                cuts.append(((run_start + i) // 2) * win)
+            run_start = None
+    bounds = [0] + cuts + [len(x)]
+    phrases = [x[a:b] for a, b in zip(bounds, bounds[1:]) if b > a]
+    merged: list[np.ndarray] = []
+    for p in phrases:  # glue very short bits to the previous phrase
+        if merged and len(p) < min_phrase * audio.SAMPLE_RATE:
+            merged[-1] = np.concatenate([merged[-1], p])
+        else:
+            merged.append(p)
+    if len(merged) > 1 and len(merged[0]) < min_phrase * audio.SAMPLE_RATE:
+        merged[1] = np.concatenate([merged[0], merged[1]])
+        merged.pop(0)
+    return merged
+
+
+class LocalEngine:
+    def __init__(self):
+        self._rec: dict[str, object] = {}
+        self._locks = {m: threading.Lock() for m in MODELS}
+        self._load_lock = threading.Lock()
+        self._pool = ThreadPoolExecutor(max_workers=2)
+
+    def _recognizer(self, name: str):
+        with self._load_lock:
+            if name not in self._rec:
+                if not models_ready():
+                    raise ModelMissing("Speech models not downloaded yet")
+                import sherpa_onnx
+
+                d = model_dir(name)
+                self._rec[name] = sherpa_onnx.OfflineRecognizer.from_transducer(
+                    encoder=str(d / "encoder.int8.onnx"),
+                    decoder=str(d / "decoder.int8.onnx"),
+                    joiner=str(d / "joiner.int8.onnx"),
+                    tokens=str(d / "tokens.txt"),
+                    num_threads=max(1, min(8, (os.cpu_count() or 4) // 2)),  # two models run in parallel
+                    model_type="nemo_transducer",
+                    # Greedy: sherpa-onnx's beam search (needed for hotwords) sometimes
+                    # returns empty text with these TDT models. Vocabulary is applied
+                    # by the cleanup step instead.
+                    decoding_method="greedy_search",
+                )
+            return self._rec[name]
+
+    def preload(self) -> None:
+        for m in MODELS:
+            self._recognizer(m)
+
+    def decode(self, name: str, x: np.ndarray, hotwords: list[str] | None = None) -> str:
+        rec = self._recognizer(name)
+        with self._locks[name]:
+            stream = rec.create_stream()
+            stream.accept_waveform(audio.SAMPLE_RATE, x.astype(np.float32) / 32768.0)
+            rec.decode_stream(stream)
+            return stream.result.text.strip()
+
+    def transcribe(self, x: np.ndarray, lang: str, vocabulary: list[str]) -> tuple[str, list[str]]:
+        """x: int16 @16 kHz. lang: auto/sk/de/en. Returns (text, languages)."""
+        if lang == "sk":
+            return self.decode("sk", x, vocabulary), ["sk"]
+        if lang in ("de", "en"):
+            return self.decode("base", x, vocabulary), [lang]
+        texts, langs = [], []
+        for phrase in split_phrases(x):
+            # Run both models at once and keep the output that reads right.
+            sk_future = self._pool.submit(self.decode, "sk", phrase, vocabulary)
+            base_text = self.decode("base", phrase, vocabulary)
+            sk_text = sk_future.result()
+            if langid.pick(base_text, sk_text) == "sk":
+                text, guess = sk_text, "sk"
+            else:
+                text, guess = base_text, langid.guess(base_text)
+            if text:
+                texts.append(text.replace("<unk>", "").strip())
+                if guess and guess not in langs:
+                    langs.append(guess)
+        return " ".join(texts), langs
+
+
+_engine: LocalEngine | None = None
+_engine_lock = threading.Lock()
+
+
+def engine() -> LocalEngine:
+    global _engine
+    with _engine_lock:
+        if _engine is None:
+            _engine = LocalEngine()
+        return _engine
+
+
+def download_cli() -> None:
+    def show(frac, msg):
+        sys.stderr.write(f"\r[hlas] {msg}   ")
+        sys.stderr.flush()
+
+    download_models(show)
+    sys.stderr.write("\n[hlas] speech models ready\n")

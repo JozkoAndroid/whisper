@@ -24,7 +24,7 @@ def test_segments_are_transcribed_in_order_with_their_language(monkeypatch):
         return {"sk": "Ahoj.", "de": "Wie geht's?"}[lang], lang
 
     monkeypatch.setattr(stt, "transcribe", fake)
-    t = pipeline.Transcriber(Config(cleanup=False))
+    t = pipeline.Transcriber(Config(cleanup=False, stt_provider="openai"))
     segs = [(speech(1), "sk"), (np.zeros(SR, np.int16), "en"), (speech(1), "de")]
     r = t.transcribe_segments(segs)
     assert r.text == "Ahoj. Wie geht's?"
@@ -34,13 +34,13 @@ def test_segments_are_transcribed_in_order_with_their_language(monkeypatch):
 
 def test_silence_returns_warning(monkeypatch):
     monkeypatch.setattr(stt, "transcribe", lambda *a, **k: (_ for _ in ()).throw(AssertionError("called")))
-    r = pipeline.Transcriber(Config()).transcribe_segments([(np.zeros(SR * 2, np.int16), "auto")])
+    r = pipeline.Transcriber(Config(stt_provider="openai")).transcribe_segments([(np.zeros(SR * 2, np.int16), "auto")])
     assert r.text == "" and r.warning == "No speech detected"
 
 
 def test_http_api(monkeypatch):
     monkeypatch.setattr(stt, "transcribe", lambda wav, lang, cfg, fn="audio.wav", mime="audio/wav": (f"hello {lang} {fn}", lang))
-    t = pipeline.Transcriber(Config(cleanup=False))
+    t = pipeline.Transcriber(Config(cleanup=False, stt_provider="openai"))
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.make_handler(t, "secret", cors=False))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{httpd.server_address[1]}"

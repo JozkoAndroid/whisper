@@ -107,6 +107,11 @@ class Transcriber:
         if not jobs:
             return Result(text="", raw="", seconds_audio=total, warning="No speech detected")
 
+        if cfg.stt_provider == "local":
+            from . import local
+
+            if not local.models_ready():
+                local.download_cli()
         t0 = time.monotonic()
         futures = [self._pool.submit(stt.transcribe, audio.to_wav(c), lang, cfg) for c, lang in jobs]
         parts = [f.result() for f in futures]  # raises SttError
@@ -115,8 +120,9 @@ class Transcriber:
         raw = join_parts([p[0] for p in parts])
         langs = []
         for _, lang in parts:
-            if lang and lang not in langs:
-                langs.append(lang)
+            for l in (lang or "").split(","):
+                if l and l != "auto" and l not in langs:
+                    langs.append(l)
 
         warning = None
         text = raw

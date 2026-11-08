@@ -18,7 +18,8 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 LANGS = ("auto", "sk", "de", "en")
-STT_PROVIDERS = ("openai", "elevenlabs", "groq", "local")
+STT_PROVIDERS = ("local", "groq", "openai", "elevenlabs")
+CLEANUP_PROVIDERS = ("auto", "groq", "ollama", "claude")
 
 ENV_KEYS = {
     "openai_api_key": "OPENAI_API_KEY",
@@ -39,20 +40,24 @@ def config_dir() -> Path:
 
 @dataclass
 class Config:
-    # Speech to text
-    stt_provider: str = "openai"
+    # Speech to text. "local" = free offline models (default), "groq" = free
+    # tier online, "openai"/"elevenlabs" = paid.
+    stt_provider: str = "local"
     openai_model: str = "gpt-transcribe"
     elevenlabs_model: str = "scribe_v2"
     groq_model: str = "whisper-large-v3"
-    local_model: str = "large-v3"
     language: str = "auto"  # auto = Slovak/German/English, mixing allowed
     languages: list[str] = field(default_factory=lambda: ["sk", "de", "en"])
     vocabulary: list[str] = field(default_factory=list)  # names, jargon, product terms
 
-    # Cleanup pass (Claude). Optional: without a key the raw transcript is used.
+    # Cleanup pass. Optional: without a provider the raw transcript is used.
     cleanup: bool = True
-    cleanup_model: str = "claude-opus-5-5"
-    cleanup_effort: str = "low"  # low keeps latency down; raise for harder text
+    cleanup_provider: str = "auto"  # auto, groq, ollama, claude
+    groq_cleanup_model: str = ""  # empty = pick the best model Groq offers
+    ollama_url: str = "http://localhost:11434"
+    ollama_model: str = "gemma3:12b"
+    cleanup_model: str = "claude-opus-5-5"  # only for cleanup_provider = claude (paid)
+    cleanup_effort: str = "low"
     context_aware: bool = True  # coding style in IDEs/terminals (Windows only)
 
     # Keys
@@ -104,6 +109,8 @@ class Config:
         if self.language not in LANGS:
             self.language = "auto"
         if self.stt_provider not in STT_PROVIDERS:
-            self.stt_provider = "openai"
+            self.stt_provider = "local"
+        if self.cleanup_provider not in CLEANUP_PROVIDERS:
+            self.cleanup_provider = "auto"
         self.languages = [l for l in self.languages if l in LANGS[1:]] or ["sk", "de", "en"]
         self.vocabulary = [v.strip() for v in self.vocabulary if v and v.strip()]
