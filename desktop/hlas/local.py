@@ -51,7 +51,7 @@ def models_ready() -> bool:
 TOTAL_BYTES = 1_341_000_000  # approximate, only for the progress display
 
 
-def _fetch(url: str, dest: Path, on_bytes: Callable[[int], None], attempts: int = 6) -> None:
+def _fetch(url: str, dest: Path, on_bytes: Callable[[int], None], attempts: int = 10) -> None:
     """Download url to dest, resuming a partial file and retrying on errors.
     No HEAD request: GitHub's signed download links only allow GET."""
     part = dest.with_suffix(dest.suffix + ".part")

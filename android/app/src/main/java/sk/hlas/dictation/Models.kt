@@ -49,7 +49,7 @@ object Models {
     internal fun fetch(url: String, dest: File, onBytes: (Long) -> Unit) {
         val part = File(dest.path + ".part")
         var lastError: Exception? = null
-        for (attempt in 0 until 6) {
+        for (attempt in 0 until 10) {
             val have = if (part.exists()) part.length() else 0L
             val req = Request.Builder().url(url).apply { if (have > 0) header("Range", "bytes=$have-") }.build()
             try {
