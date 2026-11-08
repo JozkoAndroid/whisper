@@ -26,12 +26,16 @@
 
         <Button android:id="@+id/btn_mic" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:text="1. Allow microphone" />
-        <Button android:id="@+id/btn_enable" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:text="2. Enable Hlas keyboard" />
-        <Button android:id="@+id/btn_pick" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:text="3. Switch to Hlas keyboard" />
+        <Button android:id="@+id/btn_bubble" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="2. Turn on the Hlas bubble" />
+        <TextView android:id="@+id/bubble_hint" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:textColor="#52525B"
+            android:text="In the list tap Installed apps (or Downloaded apps) > Hlas dictation bubble > On. If the switch is greyed out: open Settings > Apps > Hlas > ⋮ (top right) > Allow restricted settings, then try again." />
         <Button android:id="@+id/btn_models" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:text="4. Download offline models" />
+            android:text="3. Download offline models" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="6dp"
+            android:textColor="#52525B"
+            android:text="Then keep your own keyboard (Samsung, Gboard...). Tap any text field: a mic bubble appears above the keyboard. Tap it to talk, tap again to finish. Drag it to move it. Tap the language label next to it to switch language." />
 
         <TextView style="@style/Label" android:text="Speech model" />
         <Spinner android:id="@+id/provider" android:layout_width="match_parent" android:layout_height="wrap_content" />
@@ -65,6 +69,12 @@
         <Button android:id="@+id/btn_save" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:layout_marginTop="16dp" android:text="Save" />
 
+        <TextView style="@style/Label" android:layout_marginTop="24dp" android:text="Optional: Hlas as a keyboard" android:textSize="16sp" />
+        <Button android:id="@+id/btn_enable" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="Enable Hlas keyboard" />
+        <Button android:id="@+id/btn_pick" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="Switch keyboard" />
+
         <TextView style="@style/Label" android:text="Try it here:" />
         <EditText android:layout_width="match_parent" android:layout_height="wrap_content"
             android:gravity="top" android:hint="Tap here, then use the Hlas keyboard" android:inputType="textMultiLine"
@@ -74,7 +84,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="Free setup: download the offline models (step 4). Optional: a free Groq key for text cleanup. Tap the mic to talk hands-free, tap again to finish, or hold and release. Tap the language chip while talking to switch language. Offline models: NVIDIA Parakeet TDT 0.6B v3 and KInIT parakeet-tdt-0.6b-v3-sk (CC-BY-4.0). Keys stay on this phone."
+            android:text="Everything runs offline on this phone and is free. A quiet Hlas is ready notification stays while the bubble is on: Android needs it so Hlas may use the microphone inside other apps. Optional: a free Groq key improves punctuation and spelling. Offline models: NVIDIA Parakeet TDT 0.6B v3 and KInIT parakeet-tdt-0.6b-v3-sk (CC-BY-4.0). Keys stay on this phone."
             android:textColor="#52525B" />
     </LinearLayout>
 </ScrollView>

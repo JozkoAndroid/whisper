@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Hlas</string>
+    <string name="a11y_label">Hlas dictation bubble</string>
+    <string name="a11y_description">Shows a small microphone bubble above your keyboard when you tap into a text field, and types what you dictate into that field. Hlas uses this permission only to see which text field is focused and to insert your dictated text. Nothing is read or sent anywhere else.</string>
 </resources>

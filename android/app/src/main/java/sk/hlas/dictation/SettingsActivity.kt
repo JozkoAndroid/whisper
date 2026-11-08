@@ -47,7 +47,7 @@ class SettingsActivity : Activity() {
 
         val download = findViewById<Button>(R.id.btn_models)
         fun showModels() {
-            download.text = if (Models.ready(this)) "Offline models ready ✓" else "Download offline models (1.3 GB, Wi-Fi)"
+            download.text = if (Models.ready(this)) "3. Offline models ready ✓" else "3. Download offline models (1.3 GB, Wi-Fi)"
             download.isEnabled = !Models.ready(this)
         }
         showModels()
@@ -69,7 +69,12 @@ class SettingsActivity : Activity() {
         val vocab = findViewById<EditText>(R.id.vocabulary).apply { setText(prefs.vocabulary.joinToString("\n")) }
 
         findViewById<Button>(R.id.btn_mic).setOnClickListener {
-            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1)
+            val perms = mutableListOf(Manifest.permission.RECORD_AUDIO)
+            if (android.os.Build.VERSION.SDK_INT >= 33) perms.add(Manifest.permission.POST_NOTIFICATIONS)
+            requestPermissions(perms.toTypedArray(), 1)
+        }
+        findViewById<Button>(R.id.btn_bubble).setOnClickListener {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
         findViewById<Button>(R.id.btn_enable).setOnClickListener {
             startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
@@ -96,11 +101,26 @@ class SettingsActivity : Activity() {
     override fun onResume() {
         super.onResume()
         updateMicButton()
+        updateBubbleButton()
+        MicService.start(this)  // allowed now because Hlas is on screen
+    }
+
+    private fun bubbleEnabled(): Boolean {
+        val enabled = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty()
+        return enabled.split(':').any { it.startsWith("$packageName/") }
+    }
+
+    private fun updateBubbleButton() {
+        val on = bubbleEnabled()
+        findViewById<Button>(R.id.btn_bubble).text = if (on) "2. Hlas bubble is on ✓" else "2. Turn on the Hlas bubble"
+        findViewById<android.widget.TextView>(R.id.bubble_hint).visibility =
+            if (on) android.view.View.GONE else android.view.View.VISIBLE
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         updateMicButton()
+        MicService.start(this)
     }
 
     private fun updateMicButton() {

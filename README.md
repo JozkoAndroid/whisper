@@ -59,11 +59,23 @@ Every dictation is also saved to `%APPDATA%\Hlas\history.jsonl`.
 
 ## Android
 
-1. Download and install [Hlas-android.apk](https://github.com/JozkoAndroid/whisper/releases/download/app-latest/Hlas-android.apk). It needs a 64-bit phone with about 6 GB of RAM or more.
-2. Open **Hlas** and tap: 1. Allow microphone, 2. Enable Hlas keyboard, 3. Switch to Hlas keyboard, 4. **Download offline models** (1.3 GB, use Wi-Fi).
-3. In any app, switch to the Hlas keyboard. Tap the mic to talk and tap again to finish, or hold it and release. Tap the language chip while you talk to force a language. **ABC** switches back to your normal keyboard.
+You keep your own keyboard (Samsung, Gboard...). Like Wispr Flow on Android, Hlas shows a small **mic bubble above the keyboard** whenever you tap into a text field.
 
-The optional cleanup with a free Groq key works the same as on Windows.
+1. Download and install [Hlas-android.apk](https://github.com/JozkoAndroid/whisper/releases/download/app-latest/Hlas-android.apk). It needs a 64-bit phone with about 6 GB of RAM or more.
+2. Open **Hlas** and tap:
+   1. **Allow microphone**.
+   2. **Turn on the Hlas bubble**. In the list choose Installed apps > Hlas dictation bubble > On. If the switch is greyed out ("restricted setting"), open Settings > Apps > Hlas > ⋮ > *Allow restricted settings*, then try again. Android does this for every app installed outside the Play Store.
+   3. **Download offline models** (1.3 GB, use Wi-Fi).
+3. In any app, tap a text field. Then:
+   - **Tap the bubble** to talk, and tap it again to finish. Or **hold** it while you talk and let go.
+   - **Tap the label** next to it to switch language.
+   - **Drag** it to move it.
+
+What to expect:
+- A quiet "Hlas is ready" notification stays visible. Android requires it so that Hlas may use the microphone while you're in other apps.
+- After a phone restart, the first tap on the bubble takes about a second, because Hlas briefly opens and closes to re-enable the microphone.
+- Hlas uses the accessibility permission only to see which text field is focused and to type into it.
+- The Hlas keyboard still exists as an optional extra.
 
 ## Using it in other projects
 
