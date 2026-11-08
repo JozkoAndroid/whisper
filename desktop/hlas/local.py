@@ -19,6 +19,8 @@ from __future__ import annotations
 import os
 import sys
 import threading
+import time
+import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -46,35 +48,69 @@ def models_ready() -> bool:
     return all((model_dir(m) / f).is_file() for m in MODELS for f in FILES)
 
 
+TOTAL_BYTES = 1_341_000_000  # approximate, only for the progress display
+
+
+def _fetch(url: str, dest: Path, on_bytes: Callable[[int], None], attempts: int = 6) -> None:
+    """Download url to dest, resuming a partial file and retrying on errors.
+    No HEAD request: GitHub's signed download links only allow GET."""
+    part = dest.with_suffix(dest.suffix + ".part")
+    for attempt in range(attempts):
+        have = part.stat().st_size if part.exists() else 0
+        req = urllib.request.Request(url, headers={"User-Agent": "hlas", **({"Range": f"bytes={have}-"} if have else {})})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                resumed = r.status == 206
+                if not resumed and have:
+                    on_bytes(-have)  # server ignored the range: start over
+                    have = 0
+                length = int(r.headers.get("Content-Length") or 0)
+                expected = have + length if length else 0
+                with open(part, "ab" if resumed else "wb") as out:
+                    while True:
+                        chunk = r.read(1 << 20)
+                        if not chunk:
+                            break
+                        out.write(chunk)
+                        on_bytes(len(chunk))
+            if expected and part.stat().st_size != expected:
+                raise OSError("connection closed early")
+            part.replace(dest)
+            return
+        except urllib.error.HTTPError as e:
+            if e.code == 416 and have:  # partial file already complete or broken
+                part.unlink(missing_ok=True)
+            elif e.code < 500 and e.code != 429:
+                raise RuntimeError(f"download failed: HTTP {e.code}") from e
+        except (OSError, TimeoutError):
+            pass
+        time.sleep(min(30, 2 ** attempt))
+    raise RuntimeError("download failed after several tries, check your internet and try again")
+
+
 def download_models(progress: Callable[[float, str], None] | None = None) -> None:
     """Download any missing model files. progress(fraction 0..1, message)."""
     todo = [(m, f) for m in MODELS for f in FILES if not (model_dir(m) / f).is_file()]
     if not todo:
         return
-    sizes = {}
-    for m, f in todo:
-        req = urllib.request.Request(RELEASE + f"parakeet-{m}-{f}", method="HEAD")
-        with urllib.request.urlopen(req, timeout=30) as r:
-            sizes[(m, f)] = int(r.headers.get("Content-Length") or 0)
-    total = max(1, sum(sizes.values()))
-    done = 0
+    done = sum((model_dir(m) / f).stat().st_size for m in MODELS for f in FILES if (model_dir(m) / f).is_file())
+
+    def on_bytes(n: int) -> None:
+        nonlocal done
+        done += n
+        if progress:
+            pct = min(99, done * 100 // TOTAL_BYTES)
+            progress(pct / 100, f"Downloading speech models {pct}%")
+
     for m, f in todo:
         dest = model_dir(m) / f
         dest.parent.mkdir(parents=True, exist_ok=True)
         part = dest.with_suffix(dest.suffix + ".part")
-        with urllib.request.urlopen(RELEASE + f"parakeet-{m}-{f}", timeout=60) as r, open(part, "wb") as out:
-            while True:
-                chunk = r.read(1 << 20)
-                if not chunk:
-                    break
-                out.write(chunk)
-                done += len(chunk)
-                if progress:
-                    progress(done / total, f"Downloading speech models {done * 100 // total}%")
-        if sizes[(m, f)] and part.stat().st_size != sizes[(m, f)]:
-            part.unlink(missing_ok=True)
-            raise RuntimeError(f"download of {f} was incomplete, try again")
-        part.replace(dest)
+        if part.exists():
+            done += part.stat().st_size
+        _fetch(RELEASE + f"parakeet-{m}-{f}", dest, on_bytes)
+    if progress:
+        progress(1.0, "Speech models downloaded")
 
 
 def split_phrases(x: np.ndarray, min_pause: float = 0.45, min_phrase: float = 1.5) -> list[np.ndarray]:

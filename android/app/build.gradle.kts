@@ -60,7 +60,7 @@ kotlin {
 //   SHERPA_JNI_DIR=<linux sherpa-onnx jni lib dir> HLAS_MODELS_DIR=<models dir> HLAS_TEST_WAVS=<dir> ./gradlew testDebugUnitTest
 tasks.withType<Test>().configureEach {
     System.getenv("SHERPA_JNI_DIR")?.let { systemProperty("java.library.path", it) }
-    listOf("HLAS_MODELS_DIR", "HLAS_TEST_WAVS").forEach { k -> System.getenv(k)?.let { environment(k, it) } }
+    listOf("HLAS_MODELS_DIR", "HLAS_TEST_WAVS", "HLAS_DOWNLOAD_TEST").forEach { k -> System.getenv(k)?.let { environment(k, it) } }
     testLogging { showStandardStreams = true }
 }
 

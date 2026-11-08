@@ -17,50 +17,72 @@ object Models {
     fun ready(context: Context) = ready(root(context))
     fun ready(root: File) = NAMES.all { n -> FILES.all { File(dir(root, n), it).isFile } }
 
-    /** Blocking. Resumes partial downloads. progress(0..100). */
+    private const val TOTAL_BYTES = 1_341_000_000L  // approximate, for the progress display
+
+    /**
+     * Blocking. Resumes partial downloads and retries on errors. progress(0..100).
+     * No HEAD request: GitHub's signed download links only allow GET.
+     */
     fun download(context: Context, progress: (Int) -> Unit) {
         val root = root(context)
-        val todo = NAMES.flatMap { n -> FILES.map { n to it } }.filter { (n, f) -> !File(dir(root, n), f).isFile }
-        val sizes = todo.associateWith { (n, f) ->
-            Stt.http.newCall(Request.Builder().url(RELEASE + "parakeet-$n-$f").head().build()).execute()
-                .use { it.header("Content-Length")?.toLongOrNull() ?: 0L }
+        val all = NAMES.flatMap { n -> FILES.map { n to it } }
+        var done = all.sumOf { (n, f) ->
+            val d = File(dir(root, n), f)
+            val p = File(d.path + ".part")
+            if (d.isFile) d.length() else if (p.isFile) p.length() else 0L
         }
-        val total = maxOf(1L, sizes.values.sum())
-        var done = 0L
-        for ((n, f) in todo) {
+        var lastPct = -1
+        fun report(delta: Long) {
+            done += delta
+            val pct = minOf(99, (done * 100 / TOTAL_BYTES).toInt())
+            if (pct != lastPct) { lastPct = pct; progress(pct) }
+        }
+        for ((n, f) in all) {
             val dest = File(dir(root, n), f)
+            if (dest.isFile) continue
             dest.parentFile?.mkdirs()
-            val part = File(dest.path + ".part")
-            val have = if (part.exists()) part.length() else 0L
-            done += have
-            val req = Request.Builder().url(RELEASE + "parakeet-$n-$f")
-                .apply { if (have > 0) header("Range", "bytes=$have-") }.build()
-            Stt.http.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) throw SttException("Download failed: HTTP ${resp.code}")
-                val append = resp.code == 206
-                if (!append) done -= have
-                val body = resp.body ?: throw SttException("Download failed")
-                FileOutputStream(part, append).use { out ->
-                    val buf = ByteArray(1 shl 16)
-                    val input = body.byteStream()
-                    var last = -1
-                    while (true) {
-                        val r = input.read(buf)
-                        if (r < 0) break
-                        out.write(buf, 0, r)
-                        done += r
-                        val pct = (done * 100 / total).toInt()
-                        if (pct != last) { last = pct; progress(pct) }
-                    }
-                }
-            }
-            val expected = sizes[n to f] ?: 0L
-            if (expected > 0 && part.length() != expected) {
-                part.delete()
-                throw SttException("Download of $f was incomplete, try again")
-            }
-            part.renameTo(dest)
+            fetch(RELEASE + "parakeet-$n-$f", dest, ::report)
         }
         progress(100)
+    }
+
+    internal fun fetch(url: String, dest: File, onBytes: (Long) -> Unit) {
+        val part = File(dest.path + ".part")
+        var lastError: Exception? = null
+        for (attempt in 0 until 6) {
+            val have = if (part.exists()) part.length() else 0L
+            val req = Request.Builder().url(url).apply { if (have > 0) header("Range", "bytes=$have-") }.build()
+            try {
+                Stt.http.newCall(req).execute().use { resp ->
+                    if (resp.code == 416 && have > 0) { onBytes(-have); part.delete(); throw java.io.IOException("restart") }
+                    if (resp.code in 400..499 && resp.code != 429) throw SttException("Download failed: HTTP ${resp.code}")
+                    if (!resp.isSuccessful) throw java.io.IOException("HTTP ${resp.code}")
+                    val resumed = resp.code == 206
+                    if (!resumed && have > 0) onBytes(-have)
+                    val body = resp.body ?: throw java.io.IOException("empty response")
+                    val length = body.contentLength()
+                    val expected = if (length > 0) (if (resumed) have else 0L) + length else -1L
+                    FileOutputStream(part, resumed).use { out ->
+                        val buf = ByteArray(1 shl 16)
+                        val input = body.byteStream()
+                        while (true) {
+                            val r = input.read(buf)
+                            if (r < 0) break
+                            out.write(buf, 0, r)
+                            onBytes(r.toLong())
+                        }
+                    }
+                    if (expected > 0 && part.length() != expected) throw java.io.IOException("connection closed early")
+                }
+                if (!part.renameTo(dest)) throw java.io.IOException("could not save ${dest.name}")
+                return
+            } catch (e: SttException) {
+                throw e
+            } catch (e: Exception) {
+                lastError = e
+                Thread.sleep(minOf(30_000L, 1000L shl attempt))
+            }
+        }
+        throw SttException("Download failed after several tries (${lastError?.message}). Tap to resume.")
     }
 }
