@@ -47,7 +47,13 @@ jobs:
           java-version: "17"
       - name: Build APK
         working-directory: android
-        run: ./gradlew --no-daemon testDebugUnitTest assembleRelease
+        # retry: downloading Gradle/dependencies occasionally fails on GitHub's network
+        run: |
+          for i in 1 2 3; do
+            ./gradlew --no-daemon testDebugUnitTest assembleRelease && exit 0
+            sleep 30
+          done
+          exit 1
       - name: Rename APK
         run: cp android/app/build/outputs/apk/release/app-release.apk Hlas-android.apk
       - uses: actions/upload-artifact@v4
@@ -55,17 +61,25 @@ jobs:
           name: Hlas-android
           path: Hlas-android.apk
 
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
+  # Publish the newest apps at fixed links:
+  #   https://github.com/<owner>/<repo>/releases/download/app-latest/Hlas.exe
+  #   https://github.com/<owner>/<repo>/releases/download/app-latest/Hlas-android.apk
+  publish:
+    if: github.event_name == 'push'
     needs: [windows, android]
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/Hlas.exe
-            dist/Hlas-android.apk
+      - name: Update the app-latest release
+        run: |
+          TAG=app-latest
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then TAG="${GITHUB_REF#refs/tags/}"; fi
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Hlas apps ($TAG)" \
+              --notes "Download Hlas.exe (Windows) or Hlas-android.apk (Android). Updated on every change."
+          gh release upload "$TAG" dist/Hlas.exe dist/Hlas-android.apk --repo "$GITHUB_REPOSITORY" --clobber

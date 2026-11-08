@@ -5,6 +5,13 @@ Free push-to-talk dictation for **Slovak, German and English**, including switch
 - `desktop/`: Windows app (also Linux/macOS). It's also a Python library, a CLI and a local HTTP API for your other projects.
 - `android/`: an Android voice keyboard that works in any app.
 
+## Download
+
+- Windows: [Hlas.exe](https://github.com/JozkoAndroid/whisper/releases/download/app-latest/Hlas.exe)
+- Android: [Hlas-android.apk](https://github.com/JozkoAndroid/whisper/releases/download/app-latest/Hlas-android.apk)
+
+Both links always point to the newest build.
+
 ## It's free
 
 By default everything runs **offline on your own device**. There are no accounts, no API keys and no costs, and your voice never leaves your device. The only cost is a one-time 1.3 GB model download.
@@ -35,7 +42,7 @@ I also checked the other open options:
 
 ## Windows
 
-1. Get `Hlas.exe` from the latest GitHub Actions run (artifact `Hlas-windows`) or from a release.
+1. Download [Hlas.exe](https://github.com/JozkoAndroid/whisper/releases/download/app-latest/Hlas.exe).
 2. Start it. On first start it downloads the speech models (1.3 GB, once). The little pill at the bottom shows the progress.
 3. Click into any text field, then:
 
@@ -52,7 +59,7 @@ Every dictation is also saved to `%APPDATA%\Hlas\history.jsonl`.
 
 ## Android
 
-1. Install `Hlas-android.apk` (artifact `Hlas-android`). It needs a 64-bit phone with about 6 GB of RAM or more.
+1. Download and install [Hlas-android.apk](https://github.com/JozkoAndroid/whisper/releases/download/app-latest/Hlas-android.apk). It needs a 64-bit phone with about 6 GB of RAM or more.
 2. Open **Hlas** and tap: 1. Allow microphone, 2. Enable Hlas keyboard, 3. Switch to Hlas keyboard, 4. **Download offline models** (1.3 GB, use Wi-Fi).
 3. In any app, switch to the Hlas keyboard. Tap the mic to talk and tap again to finish, or hold it and release. Tap the language chip while you talk to force a language. **ABC** switches back to your normal keyboard.
 
