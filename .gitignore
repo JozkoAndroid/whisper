@@ -14,3 +14,4 @@ android/local.properties
 *.apk
 *.keystore
 android/app/libs/
+downloads/
