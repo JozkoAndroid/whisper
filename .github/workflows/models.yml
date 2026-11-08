@@ -28,7 +28,12 @@ jobs:
           fi
       - name: Free disk space
         if: steps.check.outputs.skip != 'true'
-        run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          # extra memory for quantizing the 2.4 GB encoder
+          sudo swapoff -a || true
+          sudo fallocate -l 12G /swapfile2 && sudo chmod 600 /swapfile2 && sudo mkswap /swapfile2 && sudo swapon /swapfile2
+          free -h
       - uses: actions/setup-python@v5
         if: steps.check.outputs.skip != 'true'
         with:
